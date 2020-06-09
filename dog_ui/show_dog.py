@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import sys
+import socket
 #from PySide2.QtWidgets import QApplication, QMainWindow
 #from PySide2 import QtWidgets, QtCore, QtGui
 
