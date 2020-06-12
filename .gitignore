@@ -1,5 +1,7 @@
 # File who has no extensions
-*~
+*
+!/**/
+!*.*
 
 # PYTHON
 *.pyc
