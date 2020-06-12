@@ -1,0 +1,25 @@
+# File who has no extensions
+*~
+
+# PYTHON
+*.pyc
+
+# C++
+*.o
+*.obj
+*.so
+*.a
+*.dll
+*.ko
+build/
+
+# PYTORCH
+*.pth
+*.pkl
+*.weights
+
+# TENSORFLOW
+*.pb
+*.meta
+*.index
+

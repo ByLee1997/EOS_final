@@ -1,0 +1,28 @@
+CXX= arm-unknown-linux-gnu-g++
+OBJS= cmos_test.o creator_lib.o sockop.o
+CFLAG= -g -Wall
+TARGETS= cmos_test
+
+COLOR_YELLOW='\033[0;33m'
+COLOR_NC='\033[0m'
+
+INCLUDE1 = /home/samliu/Documents/eos/lab1/microtime/linux/include/
+INCLUDE2 = /opt/microtime/pro/devkit/arm/pxa270/gcc-4.0.2-glibc-2.3.3/arm-unknown-linux-gnu/include/
+LINK = /opt/microtime/pro/devkit/arm/pxa270/gcc-4.0.2-glibc-2.3.3/arm-unknown-linux-gnu/lib/
+ 
+all: $(TARGETS)
+	@echo -e ${COLOR_YELLOW}'Remember to check whether the INCLUDE1 variable is correct or not in Makefile.'${COLOR_NC}
+
+%.o: %.c
+	$(CXX) -c $< -o $@  -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG)
+
+%.o: %.cpp
+	$(CXX) -c $< -o $@  -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG)
+
+cmos_test: $(OBJS)
+	$(CXX) -o $@ $^ -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG)
+
+clean:
+	rm -f *.o $(TARGETS) $(OBJS)
+
+.PHONY: all clean
