@@ -32,8 +32,8 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include "asm-arm/arch-pxa/lib/def.h"
-#include "asm-arm/arch-pxa/lib/creator_pxa270_lcd.h"
+#include "asm/arch/lib/def.h"
+#include "asm/arch/lib/creator_pxa270_lcd.h"
 #include "creator_lib.h"
 
 
@@ -41,7 +41,8 @@
 int 
 Delay(int ms)
 {
-	usleep(ms *1000);	
+	usleep(ms *1000);
+    return 0;	
 }
 
 	

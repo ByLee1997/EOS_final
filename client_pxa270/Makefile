@@ -1,6 +1,7 @@
 CXX= arm-unknown-linux-gnu-g++
 OBJS= cmos_test.o creator_lib.o sockop.o
-CFLAG= -g -Wall
+CFLAG= -g -Wall -O0
+# CFLAG=-gdwarf-2 -O0
 TARGETS= cmos_test
 
 COLOR_YELLOW='\033[0;33m'
@@ -11,16 +12,18 @@ INCLUDE2 = /opt/microtime/pro/devkit/arm/pxa270/gcc-4.0.2-glibc-2.3.3/arm-unknow
 LINK = /opt/microtime/pro/devkit/arm/pxa270/gcc-4.0.2-glibc-2.3.3/arm-unknown-linux-gnu/lib/
  
 all: $(TARGETS)
-	@echo -e ${COLOR_YELLOW}'Remember to check whether the INCLUDE1 variable is correct or not in Makefile.'${COLOR_NC}
+	@echo -e ${COLOR_YELLOW}'Remember to check whether the [INCLUDE1, INCLUDE2, LINK] variables are correct or not in Makefile.'${COLOR_NC}
 
+# Dependencies
 %.o: %.c
 	$(CXX) -c $< -o $@  -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG)
-
+	
+# My cpp files
 %.o: %.cpp
 	$(CXX) -c $< -o $@  -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG)
 
 cmos_test: $(OBJS)
-	$(CXX) -o $@ $^ -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG)
+	$(CXX) -o $@ $^ -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG) -pthread
 
 clean:
 	rm -f *.o $(TARGETS) $(OBJS)
