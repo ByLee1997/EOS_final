@@ -29,7 +29,7 @@ from PyQt5.QtCore import QThread, QObject, pyqtSignal, pyqtSlot, QMutex
 
 FIG_SIZE=224
 ui_mutex=QMutex()
-dog_mutex=QMutex();
+dog_mutex=QMutex()
 
 '''
 def start_tcp_server(ip, port, listen_num):
