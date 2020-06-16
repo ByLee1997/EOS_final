@@ -25,9 +25,12 @@ from socket_me import start_tcp_server, start_tcp_client
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QApplication, QMainWindow
-from PyQt5.QtCore import QThread, QObject, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QThread, QObject, pyqtSignal, pyqtSlot, QMutex
 
 FIG_SIZE=224
+ui_mutex=QMutex()
+dog_mutex=QMutex();
+
 '''
 def start_tcp_server(ip, port, listen_num):
     #create socket
@@ -225,12 +228,6 @@ class Dog_Classification:
         #print(ps,top_class,top_class.shape)
         return top_class[0,0].numpy(),top_class[1,0].numpy()==top_class[0,0].numpy(),top_class[2,0].numpy()==top_class[0,0].numpy()
 
-def handle_client(client_socket):
-    request = client_socket.recv(1024)
-    print ("[*] Received: %s" % request.decode())
-    
-    client_socket.send("hello".encode()+request)
-    client_socket.close()
     
 class Fig_Server(QThread):
     sinOut = pyqtSignal(Dog_user)
@@ -248,12 +245,14 @@ class Fig_Server(QThread):
             if self.date!=datetime.datetime.now().day:
                 self.date=datetime.datetime.now().day
                 self.day+=1
+                dog_mutex.lock()
                 for i in range(3):
                     self.dog[i].dog_avg_eat_time=(self.dog[i].dog_avg_eat_time*(self.day-1)+self.dog[i].dog_eat_time)/self.day
                     self.dog[i].dog_avg_drink_time=(self.dog[i].dog_avg_drink_time*(self.day-1)+self.dog[i].dog_drink_time)/self.day
                     self.dog[i].dog_eat_time=0
                     self.dog[i].dog_drink_time=0
                     self.sinOut.emit(self.dog[i])
+                dog_mutex.unlock()
             time.sleep(60)
                 
         
@@ -262,7 +261,7 @@ class Fig_Server(QThread):
         print("i'm running")
         timer_handler=threading.Thread(target=self.change_day_timer, args=())
         timer_handler.start()
-        
+        threads = []
         while True:
             client,addr = self.sock.accept()
 
@@ -270,8 +269,12 @@ class Fig_Server(QThread):
             #fig_server.client_fig_handler(client)
             client_handler = threading.Thread(target=self.client_fig_handler, args=(client,))
             client_handler.start()
+            threads.append(client_handler);
 
         self.sock.close()
+        for thread in threads:
+            thread.join()
+        
         
     def recvall(self, conn, count):
         buf = b''
@@ -328,6 +331,7 @@ class Fig_Server(QThread):
             result,eat,drink=self.nn.test(img)
             
             if result!=3:
+                dog_mutex.lock()
                 if place_id==0:
                     self.dog[result].dog_place='place_A'
                 elif place_id==1:
@@ -338,6 +342,7 @@ class Fig_Server(QThread):
                 self.dog[result].dog_eat_time+=eat_time+1
                 self.dog[result].dog_drink_time+=drink_time+2
                 self.dog[result].show_info()
+                dog_mutex.unlock()
                 self.sinOut.emit(self.dog[result])
             
             
@@ -552,6 +557,7 @@ class MainWindow(QMainWindow):
         
         
     def update_dog_info(self, msg):
+        ui_mutex.lock()
         if msg.dog_id==0:
 #             self.dog_today_eat_time_1.value=msg.dog_eat_time
 #             self.dog_today_drink_time_1.value=msg.dog_drink_time
@@ -575,6 +581,7 @@ class MainWindow(QMainWindow):
             self.dog_avg_drink_time_3.display(msg.dog_avg_drink_time)
             self.dog_place_3.setText(msg.dog_place)
 
+        ui_mutex.unlock()
 
 
 if __name__ == "__main__":
