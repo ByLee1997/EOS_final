@@ -7,6 +7,24 @@ import socket
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QApplication, QMainWindow
 
+'''
+def start_tcp_server(ip, port, listen_num):
+    #create socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    except socket.error as error_msg:
+        print ("fail to listen on port %s"%error_msg)
+        sys.exit(1)
+    #ip = socket.gethostbyname(socket.gethostname())
+    server_address = (ip, port)
+    #bind port
+    print('starting listen on ip %s, port %s'%server_address)
+    sock.bind(server_address)
+    #starting listening, allow only one connection
+    sock.listen(listen_num)
+    return sock
+'''
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -25,9 +43,9 @@ class MainWindow(QMainWindow):
         self.dog_place_1 = QtWidgets.QTextBrowser(self.centralWidget)
         self.dog_place_1.setGeometry(QtCore.QRect(110, 330, 256, 31))
         self.dog_place_1.setObjectName("dog_place_1")
-        self.dog_today_eat_time = QtWidgets.QLCDNumber(self.centralWidget)
-        self.dog_today_eat_time.setGeometry(QtCore.QRect(110, 410, 81, 21))
-        self.dog_today_eat_time.setObjectName("dog_today_eat_time")
+        self.dog_today_eat_time_1 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_today_eat_time_1.setGeometry(QtCore.QRect(110, 410, 81, 21))
+        self.dog_today_eat_time_1.setObjectName("dog_today_eat_time_1")
         self.label_1_3 = QtWidgets.QLabel(self.centralWidget)
         self.label_1_3.setGeometry(QtCore.QRect(200, 410, 51, 21))
         self.label_1_3.setObjectName("label_1_3")
@@ -153,6 +171,7 @@ class MainWindow(QMainWindow):
         self.dog_fig_3.setScaledContents(True)
         self.dog_fig_3.setObjectName("dog_fig_3")
         MainWindow.setCentralWidget(self.centralWidget)
+        '''
         self.menuBar = QtWidgets.QMenuBar(MainWindow)
         self.menuBar.setGeometry(QtCore.QRect(0, 0, 1127, 28))
         self.menuBar.setObjectName("menuBar")
@@ -166,37 +185,40 @@ class MainWindow(QMainWindow):
         self.statusBar.setObjectName("statusBar")
         MainWindow.setStatusBar(self.statusBar)
         self.menuBar.addAction(self.menuDOG.menuAction())
+        '''
 
         self.retranslateUi(MainWindow)
+        self.dog_place_1.setText("abcd")
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
         MainWindow.setWindowTitle(_translate("MainWindow", "DOG"))
         self.dog_name_1.setText(_translate("MainWindow", "Dog1"))
-        self.label_1_3.setText(_translate("MainWindow", "times  /"))
-        self.label_1_4.setText(_translate("MainWindow", "times"))
-        self.label_1_6.setText(_translate("MainWindow", "times"))
-        self.label_1_5.setText(_translate("MainWindow", "times /"))
+        self.label_1_3.setText(_translate("MainWindow", "secs  /"))
+        self.label_1_4.setText(_translate("MainWindow", "secs"))
+        self.label_1_6.setText(_translate("MainWindow", "secs"))
+        self.label_1_5.setText(_translate("MainWindow", "secs /"))
         self.label_1_1.setText(_translate("MainWindow", "Today"))
         self.label_1_2.setText(_translate("MainWindow", "Average"))
         self.label_eat.setText(_translate("MainWindow", "Eat"))
         self.label_drink.setText(_translate("MainWindow", "Drink"))
-        self.label_1_7.setText(_translate("MainWindow", "times  /"))
-        self.label_1_8.setText(_translate("MainWindow", "times"))
+        self.label_1_7.setText(_translate("MainWindow", "secs  /"))
+        self.label_1_8.setText(_translate("MainWindow", "secs"))
         self.label_1_9.setText(_translate("MainWindow", "Average"))
         self.dog_name_2.setText(_translate("MainWindow", "Dog2"))
         self.label_1_10.setText(_translate("MainWindow", "Today"))
-        self.label_1_11.setText(_translate("MainWindow", "times /"))
-        self.label_1_12.setText(_translate("MainWindow", "times"))
-        self.label_1_13.setText(_translate("MainWindow", "times  /"))
-        self.label_1_14.setText(_translate("MainWindow", "times"))
+        self.label_1_11.setText(_translate("MainWindow", "secs /"))
+        self.label_1_12.setText(_translate("MainWindow", "secs"))
+        self.label_1_13.setText(_translate("MainWindow", "secs  /"))
+        self.label_1_14.setText(_translate("MainWindow", "secs"))
         self.label_1_15.setText(_translate("MainWindow", "Average"))
         self.dog_name_3.setText(_translate("MainWindow", "Dog3"))
         self.label_1_16.setText(_translate("MainWindow", "Today"))
-        self.label_1_17.setText(_translate("MainWindow", "times /"))
-        self.label_1_18.setText(_translate("MainWindow", "times"))
-        self.menuDOG.setTitle(_translate("MainWindow", "DOG"))
+        self.label_1_17.setText(_translate("MainWindow", "secs /"))
+        self.label_1_18.setText(_translate("MainWindow", "secs"))
+        #self.menuDOG.setTitle(_translate("MainWindow", "DOG"))
+        
 
 
 

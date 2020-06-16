@@ -1,0 +1,590 @@
+#!/usr/bin/python
+
+import sys
+import socket
+import threading
+import signal
+import datetime
+import time
+
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import numpy as np
+import pickle
+import struct
+
+import torch
+from torch import nn
+from torch import optim
+import torch.nn.functional as F
+import torchvision
+from torchvision import datasets, transforms, models
+from collections import namedtuple
+
+from socket_me import start_tcp_server, start_tcp_client
+
+from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtCore import QThread, QObject, pyqtSignal, pyqtSlot
+
+FIG_SIZE=224
+'''
+def start_tcp_server(ip, port, listen_num):
+    #create socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    except socket.error as error_msg:
+        print ("fail to listen on port %s"%error_msg)
+        sys.exit(1)
+    #ip = socket.gethostbyname(socket.gethostname())
+    server_address = (ip, port)
+    #bind port
+    print('starting listen on ip %s, port %s'%server_address)
+    sock.bind(server_address)
+    #starting listening, allow only one connection
+    sock.listen(listen_num)
+    return sock
+
+def start_tcp_client(server_ip, server_port):
+    #create socket
+    tcp_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        tcp_client.connect((server_ip, server_port))
+    except socket.error as error_msg:
+        print('fail to setup socket connection %s'%error_msg)
+    return tcp_client
+'''
+
+class ResNet(nn.Module):
+    def __init__(self, config, output_dim):
+        super().__init__()
+                
+        block, n_blocks, channels = config
+        self.in_channels = channels[0]
+            
+        assert len(n_blocks) == len(channels) == 4
+        
+        self.conv1 = nn.Conv2d(3, self.in_channels, kernel_size = 7, stride = 2, padding = 3, bias = False)
+        self.bn1 = nn.BatchNorm2d(self.in_channels)
+        self.relu = nn.ReLU(inplace = True)
+        self.maxpool = nn.MaxPool2d(kernel_size = 3, stride = 2, padding = 1)
+        
+        self.layer1 = self.get_resnet_layer(block, n_blocks[0], channels[0])
+        self.layer2 = self.get_resnet_layer(block, n_blocks[1], channels[1], stride = 2)
+        self.layer3 = self.get_resnet_layer(block, n_blocks[2], channels[2], stride = 2)
+        self.layer4 = self.get_resnet_layer(block, n_blocks[3], channels[3], stride = 2)
+        
+        self.avgpool = nn.AdaptiveAvgPool2d((1,1))
+        self.fc = nn.Linear(self.in_channels, output_dim)
+        
+    def get_resnet_layer(self, block, n_blocks, channels, stride = 1):
+    
+        layers = []
+        
+        if self.in_channels != block.expansion * channels:
+            downsample = True
+        else:
+            downsample = False
+        
+        layers.append(block(self.in_channels, channels, stride, downsample))
+        
+        for i in range(1, n_blocks):
+            layers.append(block(block.expansion * channels, channels))
+
+        self.in_channels = block.expansion * channels
+            
+        return nn.Sequential(*layers)
+        
+    def forward(self, x):
+        
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        
+        x = self.avgpool(x)
+        h = x.view(x.shape[0], -1)
+        x = self.fc(h)
+        
+        return x, h
+    
+class BasicBlock(nn.Module):
+    
+    expansion = 1
+    
+    def __init__(self, in_channels, out_channels, stride = 1, downsample = False):
+        super().__init__()
+                
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size = 3, 
+                               stride = stride, padding = 1, bias = False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size = 3, 
+                               stride = 1, padding = 1, bias = False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        
+        self.relu = nn.ReLU(inplace = True)
+        
+        if downsample:
+            conv = nn.Conv2d(in_channels, out_channels, kernel_size = 1, 
+                             stride = stride, bias = False)
+            bn = nn.BatchNorm2d(out_channels)
+            downsample = nn.Sequential(conv, bn)
+        else:
+            downsample = None
+        
+        self.downsample = downsample
+        
+    def forward(self, x):
+        
+        i = x
+        
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        
+        x = self.conv2(x)
+        x = self.bn2(x)
+        
+        if self.downsample is not None:
+            i = self.downsample(i)
+                        
+        x += i
+        x = self.relu(x)
+        
+        return x
+    
+class Dog_user:
+    def __init__(self, dogid):
+        self.dog_id=dogid
+        self.dog_place="placeA"
+        self.dog_eat_time=0
+        self.dog_drink_time=0
+        self.dog_avg_eat_time=0
+        self.dog_avg_drink_time=0
+    def show_info(self):
+        print("dog%d at %s, eat %d / %d secs, drink %d / %d secs"%(self.dog_id,self.dog_place,self.dog_eat_time,self.dog_avg_eat_time,self.dog_drink_time,self.dog_avg_drink_time))
+        
+
+class Dog_Classification:
+    def __init__(self):
+        ResNetConfig = namedtuple('ResNetConfig', ['block', 'n_blocks', 'channels'])
+        resnet18_config = ResNetConfig(block = BasicBlock,n_blocks = [2,2,2,2],channels = [64, 128, 256, 512])
+        self.OUTPUT_DIM = 4
+        self.model = ResNet(resnet18_config, self.OUTPUT_DIM)
+        #self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        #weights = [1/55/5, 1/86/5, 1/126/5, 1/459/5] #[ 1 / number of instances for each class]
+        #self.class_weights = torch.FloatTensor(weights)
+        #self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
+        #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        #model = model.to(device)
+        #criterion = criterion.to(device)
+        print(self.model)
+        self.model.load_state_dict(torch.load('dog_model18_face.pt',map_location=torch.device('cpu')))
+        self.model.eval()
+        self.transform=transforms.Compose([transforms.ToPILImage(),transforms.Resize([FIG_SIZE,FIG_SIZE]),transforms.Grayscale(num_output_channels=3),transforms.ToTensor(),transforms.Normalize((0.5,0.5,0.5,),(0.5,0.5,0.5,))])
+        #self.transform=transforms.Compose([transforms.Resize([FIG_SIZE,FIG_SIZE]),transforms.Grayscale(num_output_channels=3),transforms.ToTensor(),transforms.Normalize((0.5,0.5,0.5,),(0.5,0.5,0.5,))])
+        
+    
+    def crop_left1(self,img):
+        #return img[:,0:149,:]
+        return img[:,0:122,:]
+    def crop_right1(self,img):
+        #return img[:,75:224,:]
+        return img[:,122:224,:]
+    def crop_left2(self,img):
+        z=np.zeros((224, 75, 3),dtype=np.uint8)
+        rimg=np.append(img[:,0:149,:],z,axis=1)
+        return rimg
+    def crop_right2(self,img):
+        z=np.zeros((224, 75, 3),dtype=np.uint8)
+        rimg=np.append(z,img[:,75:224,:],axis=1)
+        return rimg
+        
+    def test(self,img):
+        #print(type(img),type(img[0]),type(img[0][0][0]))
+        gray=self.transform(img)
+        gray=gray.unsqueeze(0)
+        l=self.crop_left1(img)
+        gray_l=self.transform(l)
+        gray_l=gray_l.unsqueeze(0)
+        r=self.crop_right1(img)
+        gray_r=self.transform(r)
+        gray_r=gray_r.unsqueeze(0)
+        
+        gray=torch.cat((gray,gray_l,gray_r),0)
+        
+        logps, _ = self.model.forward(gray)
+        ps = torch.exp(logps)
+        _, top_class = ps.topk(1, dim=1)
+        #print(ps,top_class,top_class.shape)
+        return top_class[0,0].numpy(),top_class[1,0].numpy()==top_class[0,0].numpy(),top_class[2,0].numpy()==top_class[0,0].numpy()
+
+def handle_client(client_socket):
+    request = client_socket.recv(1024)
+    print ("[*] Received: %s" % request.decode())
+    
+    client_socket.send("hello".encode()+request)
+    client_socket.close()
+    
+class Fig_Server(QThread):
+    sinOut = pyqtSignal(Dog_user)
+    def __init__(self, parent=None):
+        super(Fig_Server, self).__init__(parent)
+        self.nn=Dog_Classification()
+        self.sock = start_tcp_server('127.0.0.1', int(sys.argv[1]), 30)
+        self.fig_length=224*224*3
+        self.dog=[Dog_user(i) for i in range(3)]
+        self.day=0
+        self.date=datetime.datetime.now().day
+    
+    def change_day_timer(self):
+        while True:
+            if self.date!=datetime.datetime.now().day:
+                self.date=datetime.datetime.now().day
+                self.day+=1
+                for i in range(3):
+                    self.dog[i].dog_avg_eat_time=(self.dog[i].dog_avg_eat_time*(self.day-1)+self.dog[i].dog_eat_time)/self.day
+                    self.dog[i].dog_avg_drink_time=(self.dog[i].dog_avg_drink_time*(self.day-1)+self.dog[i].dog_drink_time)/self.day
+                    self.dog[i].dog_eat_time=0
+                    self.dog[i].dog_drink_time=0
+                    self.sinOut.emit(self.dog[i])
+            time.sleep(60)
+                
+        
+        
+    def run(self):
+        print("i'm running")
+        timer_handler=threading.Thread(target=self.change_day_timer, args=())
+        timer_handler.start()
+        
+        while True:
+            client,addr = self.sock.accept()
+
+            print ("[*] Acepted connection from: %s:%d" % (addr[0],addr[1]))
+            #fig_server.client_fig_handler(client)
+            client_handler = threading.Thread(target=self.client_fig_handler, args=(client,))
+            client_handler.start()
+
+        self.sock.close()
+        
+    def recvall(self, conn, count):
+        buf = b''
+        while count:
+            newbuf = conn.recv(count)
+            if not newbuf: return None
+            buf += newbuf
+            count -= len(newbuf)
+        return buf
+
+    def client_fig_handler(self,client_socket):
+        '''
+        data = b""
+        payload_size = struct.calcsize(">L")
+        print("payload_size: {}".format(payload_size))
+
+        while len(data) < payload_size:
+            print("Recv: {}".format(len(data)))
+            data += client_socket.recv(4096)
+
+        print("Done Recv: {}".format(len(data)))
+        packed_msg_size = data[:payload_size]
+        data = data[payload_size:]
+        msg_size = struct.unpack(">L", packed_msg_size)[0]
+        print("msg_size: {}".format(msg_size))
+        while len(data) < msg_size:
+            data += client_socket.recv(4096)
+        frame_data = data[:msg_size]
+        data = data[msg_size:]
+        img=pickle.loads(frame_data, fix_imports=True, encoding="bytes")
+        '''
+        
+        stringData = self.recvall(client_socket,1+self.fig_length)
+        # stringData = recvall(conn, int(length))
+        if stringData:
+            #print(len(stringData))
+#             stringData = np.fromstring(stringData, dtype='bytes')
+            data = np.fromstring(stringData, dtype='uint8')
+            #print(len(data),data.shape)
+            place_id=data[0]
+            #print(f"placeid={place_id}")
+            data=data[1:self.fig_length+1]
+            data = data.reshape((224, 224, 3))
+            img=data
+#             eat_time=struct.unpack('I',data[self.fig_length+1:self.fig_length+1+4])
+#             drink_time=struct.unpack('I',data[self.fig_length1+4:])
+#             print(len(place_id),len(img),len(eat_time),len(drink_time))
+            eat_time=0
+            drink_time=0
+        
+            #plt.imshow(img)
+            #plt.show()
+
+            result,eat,drink=self.nn.test(img)
+            
+            if result!=3:
+                if place_id==0:
+                    self.dog[result].dog_place='place_A'
+                elif place_id==1:
+                    self.dog[result].dog_place='place_B'
+                elif place_id==2:
+                    self.dog[result].dog_place='place_C'
+
+                self.dog[result].dog_eat_time+=eat_time+1
+                self.dog[result].dog_drink_time+=drink_time+2
+                self.dog[result].show_info()
+                self.sinOut.emit(self.dog[result])
+            
+            
+            
+            send_msg=np.array([result,eat,drink],dtype=np.uint8)
+            #client_socket.send(("%d %d %d"%(result,eat,drink)).encode())
+            client_socket.send(send_msg)
+            client_socket.close()
+
+#fig_server=Fig_Server()        
+
+def signal_handler(sig, frame):
+    print('You pressed Ctrl+C!')
+    sys.exit(0)
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        QMainWindow.__init__(self)
+        self.setupUi(self)
+        
+        self.thread = Fig_Server()
+        self.thread.sinOut.connect(self.update_dog_info)
+        self.thread.start()
+
+
+    def setupUi(self, MainWindow):
+        MainWindow.setObjectName("MainWindow")
+        MainWindow.resize(1127, 605)
+        self.centralWidget = QtWidgets.QWidget(MainWindow)
+        self.centralWidget.setObjectName("centralWidget")
+        self.dog_name_1 = QtWidgets.QLabel(self.centralWidget)
+        self.dog_name_1.setGeometry(QtCore.QRect(200, 100, 67, 17))
+        self.dog_name_1.setObjectName("dog_name_1")
+        self.dog_place_1 = QtWidgets.QTextBrowser(self.centralWidget)
+        self.dog_place_1.setGeometry(QtCore.QRect(110, 330, 256, 31))
+        self.dog_place_1.setObjectName("dog_place_1")
+        self.dog_today_eat_time_1 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_today_eat_time_1.setGeometry(QtCore.QRect(110, 410, 81, 21))
+        self.dog_today_eat_time_1.setObjectName("dog_today_eat_time_1")
+        self.label_1_3 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_3.setGeometry(QtCore.QRect(200, 410, 51, 21))
+        self.label_1_3.setObjectName("label_1_3")
+        self.dog_avg_eat_time_1 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_avg_eat_time_1.setGeometry(QtCore.QRect(253, 410, 71, 23))
+        self.dog_avg_eat_time_1.setObjectName("dog_avg_eat_time_1")
+        self.label_1_4 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_4.setGeometry(QtCore.QRect(330, 410, 41, 21))
+        self.label_1_4.setObjectName("label_1_4")
+        self.dog_avg_drink_time_1 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_avg_drink_time_1.setGeometry(QtCore.QRect(253, 440, 71, 23))
+        self.dog_avg_drink_time_1.setObjectName("dog_avg_drink_time_1")
+        self.label_1_6 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_6.setGeometry(QtCore.QRect(330, 440, 41, 21))
+        self.label_1_6.setObjectName("label_1_6")
+        self.label_1_5 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_5.setGeometry(QtCore.QRect(200, 440, 51, 21))
+        self.label_1_5.setObjectName("label_1_5")
+        self.dog_today_drink_time_1 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_today_drink_time_1.setGeometry(QtCore.QRect(110, 440, 81, 21))
+        self.dog_today_drink_time_1.setObjectName("dog_today_drink_time_1")
+        self.label_1_1 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_1.setGeometry(QtCore.QRect(110, 380, 67, 17))
+        self.label_1_1.setObjectName("label_1_1")
+        self.label_1_2 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_2.setGeometry(QtCore.QRect(250, 380, 67, 17))
+        self.label_1_2.setObjectName("label_1_2")
+        self.label_eat = QtWidgets.QLabel(self.centralWidget)
+        self.label_eat.setGeometry(QtCore.QRect(40, 410, 67, 17))
+        self.label_eat.setObjectName("label_eat")
+        self.label_drink = QtWidgets.QLabel(self.centralWidget)
+        self.label_drink.setGeometry(QtCore.QRect(40, 440, 67, 17))
+        self.label_drink.setObjectName("label_drink")
+        self.label_1_7 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_7.setGeometry(QtCore.QRect(527, 410, 51, 21))
+        self.label_1_7.setObjectName("label_1_7")
+        self.dog_place_2 = QtWidgets.QTextBrowser(self.centralWidget)
+        self.dog_place_2.setGeometry(QtCore.QRect(437, 330, 256, 31))
+        self.dog_place_2.setObjectName("dog_place_2")
+        self.label_1_8 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_8.setGeometry(QtCore.QRect(657, 440, 41, 21))
+        self.label_1_8.setObjectName("label_1_8")
+        self.label_1_9 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_9.setGeometry(QtCore.QRect(577, 380, 67, 17))
+        self.label_1_9.setObjectName("label_1_9")
+        self.dog_name_2 = QtWidgets.QLabel(self.centralWidget)
+        self.dog_name_2.setGeometry(QtCore.QRect(527, 100, 67, 17))
+        self.dog_name_2.setObjectName("dog_name_2")
+        self.dog_today_eat_time_2 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_today_eat_time_2.setGeometry(QtCore.QRect(437, 410, 81, 21))
+        self.dog_today_eat_time_2.setObjectName("dog_today_eat_time_2")
+        self.dog_avg_drink_time_2 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_avg_drink_time_2.setGeometry(QtCore.QRect(580, 440, 71, 23))
+        self.dog_avg_drink_time_2.setObjectName("dog_avg_drink_time_2")
+        self.label_1_10 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_10.setGeometry(QtCore.QRect(437, 380, 67, 17))
+        self.label_1_10.setObjectName("label_1_10")
+        self.dog_avg_eat_time_2 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_avg_eat_time_2.setGeometry(QtCore.QRect(580, 410, 71, 23))
+        self.dog_avg_eat_time_2.setObjectName("dog_avg_eat_time_2")
+        self.label_1_11 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_11.setGeometry(QtCore.QRect(527, 440, 51, 21))
+        self.label_1_11.setObjectName("label_1_11")
+        self.dog_today_drink_time_2 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_today_drink_time_2.setGeometry(QtCore.QRect(437, 440, 81, 21))
+        self.dog_today_drink_time_2.setObjectName("dog_today_drink_time_2")
+        self.label_1_12 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_12.setGeometry(QtCore.QRect(657, 410, 41, 21))
+        self.label_1_12.setObjectName("label_1_12")
+        self.label_1_13 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_13.setGeometry(QtCore.QRect(860, 410, 51, 21))
+        self.label_1_13.setObjectName("label_1_13")
+        self.dog_place_3 = QtWidgets.QTextBrowser(self.centralWidget)
+        self.dog_place_3.setGeometry(QtCore.QRect(770, 330, 256, 31))
+        self.dog_place_3.setObjectName("dog_place_3")
+        self.label_1_14 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_14.setGeometry(QtCore.QRect(990, 440, 41, 21))
+        self.label_1_14.setObjectName("label_1_14")
+        self.label_1_15 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_15.setGeometry(QtCore.QRect(910, 380, 67, 17))
+        self.label_1_15.setObjectName("label_1_15")
+        self.dog_name_3 = QtWidgets.QLabel(self.centralWidget)
+        self.dog_name_3.setGeometry(QtCore.QRect(860, 100, 67, 17))
+        self.dog_name_3.setObjectName("dog_name_3")
+        self.dog_today_eat_time_3 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_today_eat_time_3.setGeometry(QtCore.QRect(770, 410, 81, 21))
+        self.dog_today_eat_time_3.setObjectName("dog_today_eat_time_3")
+        self.dog_avg_drink_time_3 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_avg_drink_time_3.setGeometry(QtCore.QRect(913, 440, 71, 23))
+        self.dog_avg_drink_time_3.setObjectName("dog_avg_drink_time_3")
+        self.label_1_16 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_16.setGeometry(QtCore.QRect(770, 380, 67, 17))
+        self.label_1_16.setObjectName("label_1_16")
+        self.dog_avg_eat_time_3 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_avg_eat_time_3.setGeometry(QtCore.QRect(913, 410, 71, 23))
+        self.dog_avg_eat_time_3.setObjectName("dog_avg_eat_time_3")
+        self.label_1_17 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_17.setGeometry(QtCore.QRect(860, 440, 51, 21))
+        self.label_1_17.setObjectName("label_1_17")
+        self.dog_today_drink_time_3 = QtWidgets.QLCDNumber(self.centralWidget)
+        self.dog_today_drink_time_3.setGeometry(QtCore.QRect(770, 440, 81, 21))
+        self.dog_today_drink_time_3.setObjectName("dog_today_drink_time_3")
+        self.label_1_18 = QtWidgets.QLabel(self.centralWidget)
+        self.label_1_18.setGeometry(QtCore.QRect(990, 410, 41, 21))
+        self.label_1_18.setObjectName("label_1_18")
+        self.dog_fig_1 = QtWidgets.QLabel(self.centralWidget)
+        self.dog_fig_1.setGeometry(QtCore.QRect(110, 130, 251, 171))
+        self.dog_fig_1.setText("")
+        self.dog_fig_1.setPixmap(QtGui.QPixmap("dog1.jpg"))
+        self.dog_fig_1.setScaledContents(True)
+        self.dog_fig_1.setWordWrap(False)
+        self.dog_fig_1.setObjectName("dog_fig_1")
+        self.dog_fig_2 = QtWidgets.QLabel(self.centralWidget)
+        self.dog_fig_2.setGeometry(QtCore.QRect(440, 130, 251, 171))
+        self.dog_fig_2.setText("")
+        self.dog_fig_2.setPixmap(QtGui.QPixmap("dog2.jpg"))
+        self.dog_fig_2.setScaledContents(True)
+        self.dog_fig_2.setObjectName("dog_fig_2")
+        self.dog_fig_3 = QtWidgets.QLabel(self.centralWidget)
+        self.dog_fig_3.setGeometry(QtCore.QRect(770, 130, 251, 171))
+        self.dog_fig_3.setText("")
+        self.dog_fig_3.setPixmap(QtGui.QPixmap("dog3.jpg"))
+        self.dog_fig_3.setScaledContents(True)
+        self.dog_fig_3.setObjectName("dog_fig_3")
+        MainWindow.setCentralWidget(self.centralWidget)
+        '''
+        self.menuBar = QtWidgets.QMenuBar(MainWindow)
+        self.menuBar.setGeometry(QtCore.QRect(0, 0, 1127, 28))
+        self.menuBar.setObjectName("menuBar")
+        self.menuDOG = QtWidgets.QMenu(self.menuBar)
+        self.menuDOG.setObjectName("menuDOG")
+        MainWindow.setMenuBar(self.menuBar)
+        self.mainToolBar = QtWidgets.QToolBar(MainWindow)
+        self.mainToolBar.setObjectName("mainToolBar")
+        MainWindow.addToolBar(QtCore.Qt.TopToolBarArea, self.mainToolBar)
+        self.statusBar = QtWidgets.QStatusBar(MainWindow)
+        self.statusBar.setObjectName("statusBar")
+        MainWindow.setStatusBar(self.statusBar)
+        self.menuBar.addAction(self.menuDOG.menuAction())
+        '''
+
+        self.retranslateUi(MainWindow)
+        self.dog_place_1.setText("abcd")
+        QtCore.QMetaObject.connectSlotsByName(MainWindow)
+
+    def retranslateUi(self, MainWindow):
+        _translate = QtCore.QCoreApplication.translate
+        MainWindow.setWindowTitle(_translate("MainWindow", "DOG"))
+        self.dog_name_1.setText(_translate("MainWindow", "Dog1"))
+        self.label_1_3.setText(_translate("MainWindow", "secs  /"))
+        self.label_1_4.setText(_translate("MainWindow", "secs"))
+        self.label_1_6.setText(_translate("MainWindow", "secs"))
+        self.label_1_5.setText(_translate("MainWindow", "secs /"))
+        self.label_1_1.setText(_translate("MainWindow", "Today"))
+        self.label_1_2.setText(_translate("MainWindow", "Average"))
+        self.label_eat.setText(_translate("MainWindow", "Eat"))
+        self.label_drink.setText(_translate("MainWindow", "Drink"))
+        self.label_1_7.setText(_translate("MainWindow", "secs  /"))
+        self.label_1_8.setText(_translate("MainWindow", "secs"))
+        self.label_1_9.setText(_translate("MainWindow", "Average"))
+        self.dog_name_2.setText(_translate("MainWindow", "Dog2"))
+        self.label_1_10.setText(_translate("MainWindow", "Today"))
+        self.label_1_11.setText(_translate("MainWindow", "secs /"))
+        self.label_1_12.setText(_translate("MainWindow", "secs"))
+        self.label_1_13.setText(_translate("MainWindow", "secs  /"))
+        self.label_1_14.setText(_translate("MainWindow", "secs"))
+        self.label_1_15.setText(_translate("MainWindow", "Average"))
+        self.dog_name_3.setText(_translate("MainWindow", "Dog3"))
+        self.label_1_16.setText(_translate("MainWindow", "Today"))
+        self.label_1_17.setText(_translate("MainWindow", "secs /"))
+        self.label_1_18.setText(_translate("MainWindow", "secs"))
+        #self.menuDOG.setTitle(_translate("MainWindow", "DOG"))
+        
+        
+    def update_dog_info(self, msg):
+        if msg.dog_id==0:
+#             self.dog_today_eat_time_1.value=msg.dog_eat_time
+#             self.dog_today_drink_time_1.value=msg.dog_drink_time
+#             self.dog_avg_eat_time_1.value=msg.dog_avg_eat_time
+#             self.dog_avg_drink_time_1.value=msg.dog_avg_drink_time
+            self.dog_today_eat_time_1.display(msg.dog_eat_time)
+            self.dog_today_drink_time_1.display(msg.dog_drink_time)
+            self.dog_avg_eat_time_1.display(msg.dog_avg_eat_time)
+            self.dog_avg_drink_time_1.display(msg.dog_avg_drink_time)
+            self.dog_place_1.setText(msg.dog_place)
+        elif msg.dog_id==1:
+            self.dog_today_eat_time_2.display(msg.dog_eat_time)
+            self.dog_today_drink_time_2.display(msg.dog_drink_time)
+            self.dog_avg_eat_time_2.display(msg.dog_avg_eat_time)
+            self.dog_avg_drink_time_2.display(msg.dog_avg_drink_time)
+            self.dog_place_2.setText(msg.dog_place)
+        elif msg.dog_id==2:
+            self.dog_today_eat_time_3.display(msg.dog_eat_time)
+            self.dog_today_drink_time_3.display(msg.dog_drink_time)
+            self.dog_avg_eat_time_3.display(msg.dog_avg_eat_time)
+            self.dog_avg_drink_time_3.display(msg.dog_avg_drink_time)
+            self.dog_place_3.setText(msg.dog_place)
+
+
+
+if __name__ == "__main__":
+    #signal.signal(signal.SIGINT, signal_handler)
+    app = QApplication([])
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
+    
+
+    
+    
+
