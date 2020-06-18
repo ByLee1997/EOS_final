@@ -1,8 +1,8 @@
 CXX= arm-unknown-linux-gnu-g++
-OBJS= cmos_test.o creator_lib.o sockop.o
+OBJS= creator_lib.o sockop.o
 CFLAG= -g -Wall -O0
 # CFLAG=-gdwarf-2 -O0
-TARGETS= cmos_test
+TARGETS= cmos_test client_plate
 
 COLOR_YELLOW='\033[0;33m'
 COLOR_NC='\033[0m'
@@ -22,7 +22,10 @@ all: $(TARGETS)
 %.o: %.cpp
 	$(CXX) -c $< -o $@  -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG)
 
-cmos_test: $(OBJS)
+cmos_test: $(OBJS) cmos_test.o
+	$(CXX) -o $@ $^ -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG) -pthread
+
+client_plate: $(OBJS) client_plate.o
 	$(CXX) -o $@ $^ -L $(LINK) -I $(INCLUDE1) -I $(INCLUDE2) $(CFLAG) -pthread
 
 clean:

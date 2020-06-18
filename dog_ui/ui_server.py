@@ -27,6 +27,23 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QApplication, QMainWindow
 from PyQt5.QtCore import QThread, QObject, pyqtSignal, pyqtSlot, QMutex
 
+import cv2
+
+''' 
+    packet_array=[plate_id, gray level image, eating time, drinking time]
+
+                   1 byte ,   320x240 bytes ,    4 bytes ,    4 bytes
+
+                   uint8_t,     uint8_t[]   ,    uint32_t,    uint32_t
+'''
+IMG_RESOLUTION              = 320 * 240
+ADDR_OFFSET_PLATE_ID        = 0
+ADDR_OFFSET_IMAGE           = 1
+ADDR_OFFSET_EATING_TIME     = 1 + IMG_RESOLUTION
+ADDR_OFFSET_DRINKING_TIME   = 1 + IMG_RESOLUTION + 4
+LENGTH_PACKET               = ADDR_OFFSET_DRINKING_TIME + 4 
+
+
 FIG_SIZE=224
 ui_mutex=QMutex()
 dog_mutex=QMutex()
@@ -234,8 +251,9 @@ class Fig_Server(QThread):
     def __init__(self, parent=None):
         super(Fig_Server, self).__init__(parent)
         self.nn=Dog_Classification()
-        self.sock = start_tcp_server('127.0.0.1', int(sys.argv[1]), 30)
-        self.fig_length=224*224*3
+        self.sock = start_tcp_server(sys.argv[1], int(sys.argv[2]), 30)
+        # self.fig_length=224*224*3
+        self.fig_length = 320*240
         self.dog=[Dog_user(i) for i in range(3)]
         self.day=0
         self.date=datetime.datetime.now().day
@@ -279,13 +297,20 @@ class Fig_Server(QThread):
     def recvall(self, conn, count):
         buf = b''
         while count:
-            newbuf = conn.recv(count)
+            try:
+                newbuf = conn.recv(count)
+
+            except socket.error as error_msg: 
+                print('samliu socket.error - ', error_msg)
+                return None
+            # if newbuf == b'':
+            #     raise RuntimeError("socket connection broken-sammmmmm")
             if not newbuf: return None
             buf += newbuf
             count -= len(newbuf)
         return buf
 
-    def client_fig_handler(self,client_socket):
+    def client_fig_handler(self, client_socket):
         '''
         data = b""
         payload_size = struct.calcsize(">L")
@@ -306,27 +331,50 @@ class Fig_Server(QThread):
         data = data[msg_size:]
         img=pickle.loads(frame_data, fix_imports=True, encoding="bytes")
         '''
-        
-        stringData = self.recvall(client_socket,1+self.fig_length)
-        # stringData = recvall(conn, int(length))
-        if stringData:
-            #print(len(stringData))
-#             stringData = np.fromstring(stringData, dtype='bytes')
-            data = np.fromstring(stringData, dtype='uint8')
-            #print(len(data),data.shape)
-            place_id=data[0]
-            #print(f"placeid={place_id}")
-            data=data[1:self.fig_length+1]
-            data = data.reshape((224, 224, 3))
-            img=data
-#             eat_time=struct.unpack('I',data[self.fig_length+1:self.fig_length+1+4])
-#             drink_time=struct.unpack('I',data[self.fig_length1+4:])
-#             print(len(place_id),len(img),len(eat_time),len(drink_time))
-            eat_time=0
-            drink_time=0
-        
-            #plt.imshow(img)
-            #plt.show()
+
+        while True:
+            string_data = self.recvall(client_socket, LENGTH_PACKET)
+            # string_data = recvall(conn, int(length))
+            
+            if not string_data:
+                print('ERROR: Broken pipe while message receiving')
+                break
+            elif len(string_data) != LENGTH_PACKET:
+                print('ERROR: Length of received data is {}, the expected length is {}', len(string_data), LENGTH_PACKET)
+                break
+            # print(len(string_data))
+            # string_data = np.fromstring(string_data, dtype='bytes')
+            packet_data = np.fromstring(string_data, dtype='uint8')
+            # print(len(packet_data), packet_data.shape)
+
+            # Plate ID data
+            place_id = packet_data[ADDR_OFFSET_PLATE_ID]
+            # print(f"placeid={place_id}")
+
+            # Eating time data
+            tmp = packet_data[ADDR_OFFSET_EATING_TIME: ADDR_OFFSET_EATING_TIME + 4]
+            eat_time = tmp[0]<<24 | tmp[1]<<16 | tmp[2]<<8 | tmp[3]<<0
+
+            # Drinking time data
+            tmp = packet_data[ADDR_OFFSET_DRINKING_TIME: ADDR_OFFSET_DRINKING_TIME + 4]
+            drink_time = tmp[0]<<24 | tmp[1]<<16 | tmp[2]<<8 | tmp[3]<<0
+
+            # Image data
+            img_gray = packet_data[ADDR_OFFSET_IMAGE:ADDR_OFFSET_IMAGE + IMG_RESOLUTION]
+            img_gray = img_gray.reshape((240, 320))
+
+            # Image preprocessing
+            img_gray = cv2.GaussianBlur(img_gray, (3, 3), 0)
+            img = np.zeros((240, 320, 3), dtype='uint8')
+            img[:, :, 0] = img_gray
+            img[:, :, 1] = img_gray
+            img[:, :, 2] = img_gray
+
+            # eat_time=struct.unpack('I',data[self.fig_length+1:self.fig_length+1+4])
+            # drink_time=struct.unpack('I',data[self.fig_length1+4:])
+            # print(len(place_id),len(img),len(eat_time),len(drink_time))
+            # plt.imshow(img)
+            # plt.show()
 
             result,eat,drink=self.nn.test(img)
             
@@ -346,11 +394,16 @@ class Fig_Server(QThread):
                 self.sinOut.emit(self.dog[result])
             
             
-            
             send_msg=np.array([result,eat,drink],dtype=np.uint8)
             #client_socket.send(("%d %d %d"%(result,eat,drink)).encode())
-            client_socket.send(send_msg)
-            client_socket.close()
+            try:
+                client_socket.send(send_msg)
+            except ConnectionResetError as error_msg:
+                print('ERROR: Broken pipe while message sending')
+                break
+
+
+        client_socket.close()
 
 #fig_server=Fig_Server()        
 
@@ -585,7 +638,11 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
-    #signal.signal(signal.SIGINT, signal_handler)
+    if len(sys.argv) != 3:
+        print("ERROR! Usage: python3 ui_server.py <server_ip> <server_port>")
+        exit(-1)
+
+    signal.signal(signal.SIGINT, signal_handler)
     app = QApplication([])
     window = MainWindow()
     window.show()
