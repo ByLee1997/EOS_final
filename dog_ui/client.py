@@ -30,7 +30,7 @@ def signal_handler(sig, frame):
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)
     #print(sys.argv[0],sys.argv[1],sys.argv[2])
-    path= 'school_dag/train/'+sys.argv[3]
+    path= 'school_dog/train/'+sys.argv[3]
     extensions= ['JPG','PNG']
     transform=transforms.Compose([transforms.ToPILImage(),transforms.Resize([240,320]),
                                   transforms.Grayscale(num_output_channels=1),transforms.ToTensor(),
@@ -38,6 +38,7 @@ if __name__ == '__main__':
                                  ])
     print(path)
     client=start_tcp_client(sys.argv[1],int(sys.argv[2]))
+    a=np.array([random.randint(0,2)],dtype='uint8')
     for f in os.listdir(path):
         if os.path.isfile(os.path.join(path,f)):
             f_text, f_ext= os.path.splitext(f)
@@ -60,7 +61,8 @@ if __name__ == '__main__':
                 #lt.imshow(norm_image, cmap=plt.get_cmap('gray'), vmin=0, vmax=255)
                 #lt.show()
                 
-                msg=np.array([random.randint(0,2)],dtype='uint8')
+                #msg=np.array([random.randint(0,2)],dtype='uint8')
+                msg=a
                 #print(msg)
                 msg=np.append(msg,norm_image)
                 #print(len(msg),type(msg[0]))
@@ -96,5 +98,6 @@ if __name__ == '__main__':
                 #print(rcv_msg,len(rcv_msg))
                 data = np.fromstring(rcv_msg, dtype='uint8')
                 print(data)
+                time.sleep(0.2)
     client.close()
                 #time.sleep(1)
