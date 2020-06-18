@@ -242,8 +242,10 @@ class Dog_Classification:
         logps, _ = self.model.forward(gray)
         ps = torch.exp(logps)
         _, top_class = ps.topk(1, dim=1)
-        #print(ps,top_class,top_class.shape)
-        return top_class[0,0].numpy(),top_class[1,0].numpy()==top_class[0,0].numpy(),top_class[2,0].numpy()==top_class[0,0].numpy()
+        print(ps,top_class,top_class.shape)
+        ifeat=top_class[1,0].numpy()==top_class[0,0].numpy() and ps[1,top_class[0,0].numpy()]>=ps[2,top_class[0,0].numpy()]
+        ifdrink=top_class[2,0].numpy()==top_class[0,0].numpy() and ps[1,top_class[0,0].numpy()]<ps[2,top_class[0,0].numpy()]
+        return top_class[0,0].numpy(), ifeat, ifdrink
 
     
 class Fig_Server(QThread):
@@ -345,11 +347,15 @@ class Fig_Server(QThread):
             # print(len(string_data))
             # string_data = np.fromstring(string_data, dtype='bytes')
             packet_data = np.fromstring(string_data, dtype='uint8')
-            # print(len(packet_data), packet_data.shape)
+            #print(len(packet_data), packet_data.shape)
 
             # Plate ID data
             place_id = packet_data[ADDR_OFFSET_PLATE_ID]
-            # print(f"placeid={place_id}")
+            #print(f"placeid={place_id}")
+            
+            # Image data
+            img_gray = packet_data[ADDR_OFFSET_IMAGE:ADDR_OFFSET_IMAGE + IMG_RESOLUTION]
+            img_gray = img_gray.reshape((240, 320, 1))
 
             # Eating time data
             tmp = packet_data[ADDR_OFFSET_EATING_TIME: ADDR_OFFSET_EATING_TIME + 4]
@@ -358,10 +364,11 @@ class Fig_Server(QThread):
             # Drinking time data
             tmp = packet_data[ADDR_OFFSET_DRINKING_TIME: ADDR_OFFSET_DRINKING_TIME + 4]
             drink_time = tmp[0]<<24 | tmp[1]<<16 | tmp[2]<<8 | tmp[3]<<0
+            
 
-            # Image data
-            img_gray = packet_data[ADDR_OFFSET_IMAGE:ADDR_OFFSET_IMAGE + IMG_RESOLUTION]
-            img_gray = img_gray.reshape((240, 320))
+            
+            
+            print(f"placeid={place_id} eat_time={eat_time} drink_time={drink_time}")
 
             # Image preprocessing
             img_gray = cv2.GaussianBlur(img_gray, (3, 3), 0)
@@ -369,12 +376,7 @@ class Fig_Server(QThread):
             img[:, :, 0] = img_gray
             img[:, :, 1] = img_gray
             img[:, :, 2] = img_gray
-
-            # eat_time=struct.unpack('I',data[self.fig_length+1:self.fig_length+1+4])
-            # drink_time=struct.unpack('I',data[self.fig_length1+4:])
-            # print(len(place_id),len(img),len(eat_time),len(drink_time))
-            # plt.imshow(img)
-            # plt.show()
+            #img=img_gray
 
             result,eat,drink=self.nn.test(img)
             
@@ -606,7 +608,12 @@ class MainWindow(QMainWindow):
         self.label_1_16.setText(_translate("MainWindow", "Today"))
         self.label_1_17.setText(_translate("MainWindow", "secs /"))
         self.label_1_18.setText(_translate("MainWindow", "secs"))
+        
         #self.menuDOG.setTitle(_translate("MainWindow", "DOG"))
+        self.dog_today_eat_time_1.setDigitCount(8)
+        self.dog_today_drink_time_1.setDigitCount(8)
+        self.dog_avg_eat_time_1.setDigitCount(8)
+        self.dog_avg_drink_time_1.setDigitCount(8)
         
         
     def update_dog_info(self, msg):
