@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 // C++ STL
 #include <iostream>
@@ -71,15 +72,18 @@ volatile int fd_socket = -1;
 volatile int fd_lcd = -1;
 volatile unsigned int drinking_time;
 volatile unsigned int eating_time;
-// mutex mutex_image;
+volatile unsigned int time_counter;
+
 pthread_mutex_t mutex_image = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_time_counting = PTHREAD_MUTEX_INITIALIZER;
 
 // Socket related
 string server_port;
 string server_ip;
 
 // Plate state
-plate_state_t plate_state = kStateIdle;
+plate_state_t current_state = kStateIdle;
+plate_state_t prev_state = kStateIdle;
 
 // Data packet from client to server
 unsigned char packet_array[kDataPacketLength];
@@ -432,8 +436,8 @@ void plate_process(int fd_socket) {
 
         // Pack "plate_id", "eating time", "drinking time" to data packet
         packet_array[kPlateIdOffset] = plate_id;
-        eating_time = 2;
-        drinking_time = 1;
+
+        ret = pthread_mutex_lock(&mutex_time_counting); 
         packet_array[kEatingTimeOffset + 0] = (unsigned char)((eating_time & 0xff000000) >> 24);
         packet_array[kEatingTimeOffset + 1] = (unsigned char)((eating_time & 0x00ff0000) >> 16);
         packet_array[kEatingTimeOffset + 2] = (unsigned char)((eating_time & 0x0000ff00) >> 8);
@@ -449,9 +453,65 @@ void plate_process(int fd_socket) {
             exit(-1);
         }
 
-        usleep(10000);
+        // Reset time counting
+        eating_time = drinking_time = 0;
+        ret = pthread_mutex_unlock(&mutex_time_counting); 
+        
+        // Wait for server response 
+        // response = [dog_id, eating action, drinking action]
+        //             1 byte,     1 byte   ,      1 byte
+        
+        char rcv_buf[10] = {0};
+        int n_bytes_read = read(fd_socket, rcv_buf, 10);
+        if(n_bytes_read == 0){
+            fprintf(stderr, "Disconnect from server\n");
+            break;
+        } else if(n_bytes_read == -1){
+            fprintf(stderr, "Error occured while reading");
+            break;
+        } else if(n_bytes_read != 3){
+            fprintf(stderr, "Get incorrect response length");
+            break;
+        }
 
+        // Read the classification results
+        unsigned char dog_id = rcv_buf[0];
+        unsigned char state_eating = rcv_buf[1];
+        unsigned char state_drinking = rcv_buf[2];
+        if(state_eating == 1 && state_drinking == 1){
+            fprintf(stderr, "Both drinking and eating!?? Weird.");
+            break;
+        }else if(state_eating == 1 && state_drinking == 0){
+            current_state = kStateEating;
+        }else if(state_eating == 0 && state_drinking == 1){
+            current_state = kStateDrinking;
+        }else{
+            current_state = kStateIdle;
+        }
+
+
+
+        usleep(10000);
     }
+
+    close(fd_socket);
+}
+
+
+void timer_cb(int signum) {
+    int ret = pthread_mutex_lock(&mutex_time_counting); 
+    if(current_state == kStateDrinking && current_state == prev_state)
+        time_counter += 1;
+    else if(current_state == kStateEating && current_state == prev_state)
+        time_counter += 1;
+    else if(prev_state == kStateEating && current_state != prev_state) {
+        eating_time = time_counter;
+        time_counter = 0;
+    }else if(prev_state == kStateDrinking && current_state != prev_state) {
+        drinking_time = time_counter;
+        time_counter = 0;
+    }
+    ret = pthread_mutex_unlock(&mutex_time_counting); 
 }
 
 
@@ -523,10 +583,21 @@ int main(int argc, char *argv[]) {
         exit(-1);
     }
 
+    // Register timer handler
+    // struct sigaction timer_action;
+    // struct itimerval timer;
+    // memset(&timer_action, 0, sizeof(timer_action));
+    // timer_action.sa_handler = &timer_cb;
+    // sigaction(SIGALRM, &timer_action, NULL);
+    // timer.it_value.tv_sec = 1;
+    // timer.it_value.tv_usec = 0;
+    // timer.it_interval.tv_sec = 1;
+    // timer.it_interval.tv_usec = 0;
+    // setitimer(ITIMER_REAL, &timer, NULL);
 
 
 
-
+    // Main plate process
     plate_process(fd_socket);
 
 
@@ -553,3 +624,4 @@ int main(int argc, char *argv[]) {
     }
     return 0;
 }
+    

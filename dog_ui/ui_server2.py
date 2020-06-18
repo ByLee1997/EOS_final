@@ -252,7 +252,7 @@ class Dog_Classification:
     
 class Fig_Server(QThread):
     sinOut = pyqtSignal(Dog_user)
-    sinfigOut = pyqtSignal(np.ndarray,np.uint8)
+    sinfigOut = pyqtSignal(np.ndarray,np.uint8,np.uint8)
     def __init__(self, parent=None):
         super(Fig_Server, self).__init__(parent)
         self.nn=Dog_Classification()
@@ -359,7 +359,7 @@ class Fig_Server(QThread):
             # Image data
             img_gray = packet_data[ADDR_OFFSET_IMAGE:ADDR_OFFSET_IMAGE + IMG_RESOLUTION]
             img_gray = img_gray.reshape((240, 320, 1))
-            self.sinfigOut.emit(img_gray,place_id)
+            
 
             # Eating time data
             tmp = packet_data[ADDR_OFFSET_EATING_TIME: ADDR_OFFSET_EATING_TIME + 4]
@@ -375,15 +375,15 @@ class Fig_Server(QThread):
             #print(f"placeid={place_id} eat_time={eat_time} drink_time={drink_time} ")
 
             # Image preprocessing
-            img_gray = cv2.GaussianBlur(img_gray, (3, 3), 0)
-            img = np.zeros((240, 320, 3), dtype='uint8')
-            img[:, :, 0] = img_gray
-            img[:, :, 1] = img_gray
-            img[:, :, 2] = img_gray
-            #img=img_gray
+            # img_gray = cv2.GaussianBlur(img_gray, (3, 3), 0)
+            # img = np.zeros((240, 320, 3), dtype='uint8')
+            # img[:, :, 0] = img_gray
+            # img[:, :, 1] = img_gray
+            # img[:, :, 2] = img_gray
+            img=img_gray
 
             result,eat,drink=self.nn.test(img)
-            
+            self.sinfigOut.emit(img_gray,place_id,np.uint8(result))
             if result!=3:
                 dog_mutex.lock()
                 if place_id==0:
@@ -426,13 +426,17 @@ class Show_video(QMainWindow):
 
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(364, 303)
+        MainWindow.resize(360, 340)
         self.centralWidget = QtWidgets.QWidget(MainWindow)
         self.centralWidget.setObjectName("centralWidget")
         self.dog_fig = QtWidgets.QLabel(self.centralWidget)
-        self.dog_fig.setGeometry(QtCore.QRect(30, 20, 321, 241))
+        self.dog_fig.setGeometry(QtCore.QRect(30, 20, 320, 240))
         self.dog_fig.setScaledContents(True)
         self.dog_fig.setObjectName("dog_fig")
+        self.dog_cls = QtWidgets.QTextBrowser(self.centralWidget)
+        self.dog_cls.setGeometry(QtCore.QRect(30, 280, 100, 30))
+        self.dog_cls.setObjectName("dog_cls")
+
         MainWindow.setCentralWidget(self.centralWidget)
         self.statusBar = QtWidgets.QStatusBar(MainWindow)
         self.statusBar.setObjectName("statusBar")
@@ -671,17 +675,42 @@ class MainWindow(QMainWindow):
         print("click3")
         self.video3.show()
 
-    def update_fig(self, img, place):
+    def update_fig(self, img, place, cls):
         
         qimage = QImage(img.data, 320, 240, QImage.Format_Grayscale8)
         #qim = ImageQt(img)
         pix = QtGui.QPixmap.fromImage(qimage)
         if place==0:
             self.video1.dog_fig.setPixmap(pix);
+            if cls==0:
+                self.video1.dog_cls.setText("dog1")
+            elif cls==1:
+                self.video1.dog_cls.setText("dog2")
+            elif cls==2:
+                self.video1.dog_cls.setText("dog3")
+            else:
+                self.video1.dog_cls.setText("")
         elif place==1:
             self.video2.dog_fig.setPixmap(pix);
+            if cls==0:
+                self.video2.dog_cls.setText("dog1")
+            elif cls==1:
+                self.video2.dog_cls.setText("dog2")
+            elif cls==2:
+                self.video2.dog_cls.setText("dog3")
+            else:
+                self.video2.dog_cls.setText("")
         elif place==2:
             self.video3.dog_fig.setPixmap(pix);
+            if cls==0:
+                self.video3.dog_cls.setText("dog1")
+            elif cls==1:
+                self.video3.dog_cls.setText("dog2")
+            elif cls==2:
+                self.video3.dog_cls.setText("dog3")
+            else:
+                self.video3.dog_cls.setText("")
+
         
         
     def update_dog_info(self, msg):
